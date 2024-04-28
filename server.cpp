@@ -1,143 +1,225 @@
-/*
- * testS.cpp
- * 
- * g++ -std=c++11 testS.cpp -o testS
- *
- */
-#include <sys/socket.h> // socket()
-#include <arpa/inet.h>  // hton*()
-#include <string.h>     // memset()
-#include <unistd.h> 
 #include <iostream>
-#include <pthread.h> //hebrass
-using namespace std;
-//
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <cstring>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <arpa/inet.h>
 
+const int PORT = 7777;
+const int MAX_CLIENTS = 10;
+const int BOARD_ROWS = 6;
+const int BOARD_COLS = 7;
+const char PLAYER_ONE = 'X';
+const char PLAYER_TWO = 'O';
+const char EMPTY_SPACE = '.';
 
-void jugar(int socket_cliente, struct sockaddr_in direccionCliente) {
-    //
-    char buffer[1024];
-    memset(buffer, '\0', sizeof(char)*1024);
-    int n_bytes = 0;
-        
-    //
-    char ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(direccionCliente.sin_addr), ip, INET_ADDRSTRLEN);
-    //
-    cout << "[" << ip << ":" << ntohs(direccionCliente.sin_port) << "] Nuevo jugador." << endl;
-    
-    //
-    while ((n_bytes = recv(socket_cliente, buffer, 1024, 0))) {
-        buffer[n_bytes] = '\0';
-                
-        //
-        if (buffer[0] == 'Q') {
-            cout << "[" << ip << ":" << ntohs(direccionCliente.sin_port) << "] Sale del juego." << endl;
-            close(socket_cliente);
-            break;
+std::mutex games_mutex;
+
+struct Game {
+    char board[BOARD_ROWS][BOARD_COLS];
+    int current_player;
+    bool game_over;
+
+    Game() : current_player(0), game_over(false) {
+        for (int i = 0; i < BOARD_ROWS; ++i) {
+            for (int j = 0; j < BOARD_COLS; ++j) {
+                board[i][j] = EMPTY_SPACE;
+            }
         }
-                
-        //
-        switch (buffer[0]) {
-            case 'C':       // C columna
-                {
-                string line(&buffer[0]);
-                cout << "[" << ip << ":" << ntohs(direccionCliente.sin_port) << "] Columna: " << line[2] << endl;
-                send(socket_cliente, "ok\n", 3, 0);
-                break;
-                }
-            default:
-                // instrucción no reconocida.
-                send(socket_cliente, "error\n", 6, 0);
+    }
+
+    // Función para realizar un movimiento
+    bool makeMove(int column) {
+        if (column < 0 || column >= BOARD_COLS) {
+            return false; // Columna inválida
+        }
+        // Encuentra la fila más baja disponible en esa columna
+        for (int i = BOARD_ROWS - 1; i >= 0; --i) {
+            if (board[i][column] == EMPTY_SPACE) {
+                board[i][column] = current_player == 0 ? PLAYER_ONE : PLAYER_TWO;
+                checkWin(i, column);
+                current_player = 1 - current_player; // Cambiar de jugador
+                return true;
+            }
+        }
+        return false; // Columna llena
+    }
+
+    bool checkLine(const char token, const int start_row, const int start_col, const int delta_row, const int delta_col) {
+    int count = 0;
+    // Verificar en una dirección
+    for (int i = 0; i < 4; ++i) {
+        int r = start_row + i * delta_row;
+        int c = start_col + i * delta_col;
+        if (r < 0 || r >= BOARD_ROWS || c < 0 || c >= BOARD_COLS || board[r][c] != token) {
+            return false;
+        }
+        count++;
+    }
+    return count == 4;
+}
+
+void checkWin(const int last_row, const int last_col) {
+    const char player_token = board[last_row][last_col];
+    // Verificar todas las direcciones desde la posición actual
+    const int directions[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}}; // horizontal, vertical, diagonal1, diagonal2
+
+    for (auto& dir : directions) {
+        if ((checkLine(player_token, last_row, last_col, dir[0], dir[1])) ||
+            (checkLine(player_token, last_row, last_col, -dir[0], -dir[1]))) {
+            game_over = true;
+            return;
         }
     }
 }
 
-void *jugar_wrapper(void *arg) {
-    pair<int, struct sockaddr_in> *data = (pair<int, struct sockaddr_in> *)arg;
-    int socket_cliente = data->first;
-    struct sockaddr_in direccionCliente = data->second;
-    jugar(socket_cliente, direccionCliente);
+
+    // Función para reiniciar el juego
+    void resetGame() {
+        for (int i = 0; i < BOARD_ROWS; ++i) {
+            for (int j = 0; j < BOARD_COLS; ++j) {
+                board[i][j] = EMPTY_SPACE;
+            }
+        }
+        current_player = 0;
+        game_over = false;
+    }
+};
+
+std::string serializeBoard(const Game& game) {
+    std::string boardStr;
+    for (int i = 0; i < BOARD_ROWS; ++i) {
+        for (int j = 0; j < BOARD_COLS; ++j) {
+            boardStr += game.board[i][j];
+            boardStr += " ";  // Espacio para separar columnas
+        }
+        boardStr += "\n"; // Nueva línea al final de cada fila
+    }
+    return boardStr;
+}
+
+std::vector<Game> games;
+
+struct ClientData {
+    int sock;
+    struct sockaddr_in address;
+    Game* game;
+};
+
+void* handle_client(void* arg) {
+    ClientData* data = static_cast<ClientData*>(arg);
+    int sock = data->sock;
+    struct sockaddr_in clientAddr = data->address;
+    Game* game = data->game;
+
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, INET_ADDRSTRLEN);
+    int client_port = ntohs(clientAddr.sin_port);
+
+    std::cout << "New player connected from [" << client_ip << ":" << client_port << "]." << std::endl;
+
+    char buffer[1024];
+
+    // Envía el tablero inicial al conectar
+    std::string boardState = serializeBoard(*game);
+    send(sock, boardState.c_str(), boardState.length(), 0);
+
+    while (true) {
+        memset(buffer, 0, sizeof(buffer));
+        int n_bytes = recv(sock, buffer, sizeof(buffer) - 1, 0);
+        if (n_bytes <= 0) {
+            std::cout << "[" << client_ip << ":" << client_port << "] Player has disconnected." << std::endl;
+            break; // Salir si el cliente se desconecta
+        }
+
+        buffer[n_bytes] = '\0'; // Asegurar que el buffer es una cadena válida
+
+        std::cout << "[" << client_ip << ":" << client_port << "] Received: " << buffer << std::endl;
+
+        if (buffer[0] == 'Q') {
+            std::cout << "[" << client_ip << ":" << client_port << "] Player quits the game." << std::endl;
+            break;
+        }
+
+        // Lógica para procesar la entrada del cliente
+        // Por ejemplo, si el cliente envía un número de columna para poner una ficha
+        int column = atoi(buffer);
+        if (game->makeMove(column)) {
+            if (game->game_over) {
+                std::string response = "¡Ganaste!\n" + serializeBoard(*game);
+                send(sock, response.c_str(), response.length(), 0);
+                game->resetGame();  // Opcional: reiniciar el juego automáticamente
+            } else {
+                std::string response = "Movimiento aceptado\n" + serializeBoard(*game);
+                send(sock, response.c_str(), response.length(), 0);
+            }
+        } else {
+            std::string response = "Movimiento inválido\n" + serializeBoard(*game);
+            send(sock, response.c_str(), response.length(), 0);
+        }
+    }
+
+    close(sock);
     delete data;
     pthread_exit(NULL);
 }
 
-
-//
 int main(int argc, char **argv) {
-    //
+    if (argc != 2) {
+        std::cout << "Usage: " << argv[0] << " <port>" << std::endl;
+        return 1;
+    }
+
     int port = atoi(argv[1]);
-    int socket_server = 0;
-    // socket address structures.
-    struct sockaddr_in direccionServidor, direccionCliente;   
-    
-    // crea el socket.
-    /*
-     * domain: 
-     *      AF_ LOCAL-> processes on the same host.
-     *      AF_INET -> processes on different hosts connected by IP (AF_INET->IPv4, AF_INET6->IPv6)
-     * type:
-     *      SOCK_STREAM: TCP (reliable, connection-oriented)
-     *      SOCK_DGRAM: UDP (unreliable, connectionless)
-     * protocol:
-     *      Protocol value for Internet Protocol(IP), which is 0.
-     */
-    cout << "Creating listening socket ...\n";
-    if ((socket_server = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        cout << "Error creating listening socket\n";
+    int server_fd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t addr_size = sizeof(struct sockaddr_in);
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("Failed to create socket");
         exit(EXIT_FAILURE);
     }
-    
-    // configuracion de los atributos de la clase sockaddr_in.
-    cout << "Configuring socket address structure ...\n";
-    memset(&direccionServidor, 0, sizeof(direccionServidor));
-    direccionServidor.sin_family      = AF_INET;
-    direccionServidor.sin_addr.s_addr = htonl(INADDR_ANY);
-    direccionServidor.sin_port        = htons(port);
-    
-    //
-    cout << "Binding socket ...\n";
-    if (bind(socket_server, (struct sockaddr *) &direccionServidor, sizeof(direccionServidor)) < 0) {
-        cout << "Error calling bind()\n";
+
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons(port);
+
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Bind failed");
         exit(EXIT_FAILURE);
     }
-    
-    //
-    cout << "Calling listening ...\n";
-    if (listen(socket_server, 1024) < 0) {
-        cout << "Error calling listen()\n";
+
+    if (listen(server_fd, MAX_CLIENTS) < 0) {
+        perror("Listen failed");
         exit(EXIT_FAILURE);
     }
-    
-    // para obtener info del cliente.
-    socklen_t addr_size;
-    addr_size = sizeof(struct sockaddr_in);
-    
-    //
-    cout << "Waiting client request ...\n";
+
+    std::cout << "Server is listening on port " << port << std::endl;
+
     while (true) {
-        /*  Wait for a connection, then accept() it  */
-        int socket_cliente;
-        
-        //
-        if ((socket_cliente = accept(socket_server, (struct sockaddr *)&direccionCliente, &addr_size)) < 0) {
-            cout << "Error calling accept()\n";
-            exit(EXIT_FAILURE);
+        int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
+        if (client_sock < 0) {
+            perror("Accept failed");
+            continue;
         }
-        
-        //
-        //jugar(socket_cliente, direccionCliente);
+
+        Game* newGame = new Game();
+        ClientData* clientData = new ClientData{client_sock, client_addr, newGame};
 
         pthread_t thread;
-        pair<int, struct sockaddr_in> *data = new pair<int, struct sockaddr_in>(socket_cliente, direccionCliente);
-        if (pthread_create(&thread, NULL, jugar_wrapper, (void *)data) != 0) {
-            cerr << "Error creating thread\n";
-            delete data;
-            close(socket_cliente);
+        if (pthread_create(&thread, NULL, handle_client, (void*)clientData) != 0) {
+            std::cerr << "Error creating thread" << std::endl;
+            delete newGame;
+            delete clientData;
+            close(client_sock);
         }
-
+        pthread_detach(thread);
     }
-    
-    //
+
     return 0;
 }

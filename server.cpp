@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sstream>
 
 const int PORT = 7777;
 const int MAX_CLIENTS = 10;
@@ -125,7 +126,10 @@ void* handle_client(void* arg) {
 
     // Envía el tablero inicial al conectar
     std::string boardState = serializeBoard(*game);
+    std::string response = "Enter column (0-6) or 'exit' to quit: \n";
+    send(sock, response.c_str(), response.length(), 0);
     send(sock, boardState.c_str(), boardState.length(), 0);
+
 
     while (true) {
         memset(buffer, 0, sizeof(buffer));
@@ -139,26 +143,38 @@ void* handle_client(void* arg) {
 
         std::cout << "[" << client_ip << ":" << client_port << "] Received: " << buffer << std::endl;
 
-        if (buffer[0] == 'Q') {
+        buffer[strcspn(buffer, "\n")] = 0;
+        buffer[strcspn(buffer, "\r")] = 0;
+
+        if (std::string(buffer) == "exit") {
             std::cout << "[" << client_ip << ":" << client_port << "] Player quits the game." << std::endl;
             break;
         }
 
-        // Lógica para procesar la entrada del cliente
-        // Por ejemplo, si el cliente envía un número de columna para poner una ficha
-        int column = atoi(buffer);
-        if (game->makeMove(column)) {
-            if (game->game_over) {
-                std::string response = "¡Ganaste!\n" + serializeBoard(*game);
-                send(sock, response.c_str(), response.length(), 0);
-                game->resetGame();  // Opcional: reiniciar el juego automáticamente
-            } else {
-                std::string response = "Movimiento aceptado\n" + serializeBoard(*game);
-                send(sock, response.c_str(), response.length(), 0);
-            }
-        } else {
+        std::string input(buffer);
+        std::istringstream iss(input);
+        int column;
+        char extraChar;
+
+        if (!(iss >> column) || iss >> extraChar) {
+            // Si no se pudo leer un entero o si hay caracteres extras después del número
             std::string response = "Movimiento inválido\n" + serializeBoard(*game);
             send(sock, response.c_str(), response.length(), 0);
+        } else {
+            // Procesa el movimiento
+            if (game->makeMove(column)) {
+                if (game->game_over) {
+                    std::string response = "¡Ganaste!\n" + serializeBoard(*game);
+                    send(sock, response.c_str(), response.length(), 0);
+                    game->resetGame();  // Opcional: reiniciar el juego automáticamente
+                } else {
+                    std::string response = "Movimiento aceptado\n" + serializeBoard(*game);
+                    send(sock, response.c_str(), response.length(), 0);
+                }
+            } else {
+                std::string response = "Movimiento inválido\n" + serializeBoard(*game);
+                send(sock, response.c_str(), response.length(), 0);
+            }
         }
     }
 

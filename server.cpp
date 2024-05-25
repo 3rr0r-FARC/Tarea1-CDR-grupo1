@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sstream>
+#include <random>
 
 const int PORT = 7777;
 const int MAX_CLIENTS = 10;
@@ -110,6 +111,29 @@ struct ClientData {
     Game* game;
 };
 
+
+void computerMove(Game& game) {
+    std::vector<int> availableColumns;
+    for (int col = 0; col < BOARD_COLS; ++col) {
+        if (game.board[BOARD_ROWS - 1][col] == EMPTY_SPACE) {  // Comprueba si la fila superior está libre
+            availableColumns.push_back(col);
+        }
+    }
+
+    if (!availableColumns.empty()) {
+        std::random_device rd;  // Obtener un número aleatorio del dispositivo de hardware
+        std::mt19937 gen(rd()); // Motor de generación de números aleatorios
+        std::uniform_int_distribution<> distrib(0, availableColumns.size() - 1);
+
+        int column = availableColumns[distrib(gen)]; // Elije una columna al azar
+        game.makeMove(column);
+        std::cout << "Computer placed on column " << column << std::endl;
+        if (game.game_over) {
+            std::cout << "Computer wins!\n";
+        }
+    }
+}
+
 void* handle_client(void* arg) {
     ClientData* data = static_cast<ClientData*>(arg);
     int sock = data->sock;
@@ -160,27 +184,29 @@ void* handle_client(void* arg) {
             // Si no se pudo leer un entero o si hay caracteres extras después del número
             std::string response = "Movimiento inválido\n" + serializeBoard(*game);
             send(sock, response.c_str(), response.length(), 0);
-        } else {
-            // Procesa el movimiento
-            if (game->makeMove(column)) {
-                if (game->game_over) {
-                    std::string response = "¡Ganaste!\n" + serializeBoard(*game);
-                    send(sock, response.c_str(), response.length(), 0);
-                    game->resetGame();  // Opcional: reiniciar el juego automáticamente
-                } else {
-                    std::string response = "Movimiento aceptado\n" + serializeBoard(*game);
-                    send(sock, response.c_str(), response.length(), 0);
-                }
-            } else {
-                std::string response = "Movimiento inválido\n" + serializeBoard(*game);
+        } else if (game->makeMove(column)) {
+            if (game->game_over) {
+                std::string response = "¡Ganaste!\n" + serializeBoard(*game);
                 send(sock, response.c_str(), response.length(), 0);
+                game->resetGame();  // Reinicia el juego automáticamente
+            } else {
+                computerMove(*game);  // Llama a la función de movimiento del computador
+                std::string response = "Movimiento aceptado\n" + serializeBoard(*game);
+                send(sock, response.c_str(), response.length(), 0);
+                if (game->game_over) {
+                    response = "El computador gana!\n" + serializeBoard(*game);
+                    send(sock, response.c_str(), response.length(), 0);
+                    game->resetGame();
+                }
             }
-        }
-    }
-
-    close(sock);
-    delete data;
-    pthread_exit(NULL);
+        } else {
+            std::string response = "Movimiento inválido\n" + serializeBoard(*game);
+            send(sock, response.c_str(), response.length(), 0);
+        }   
+    }   
+        close(sock);
+        delete data;
+        pthread_exit(NULL);
 }
 
 int main(int argc, char **argv) {

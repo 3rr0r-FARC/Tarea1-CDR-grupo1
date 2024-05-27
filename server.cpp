@@ -10,7 +10,6 @@
 #include <sstream>
 #include <random>
 
-const int PORT = 7777;
 const int MAX_CLIENTS = 10;
 const int BOARD_ROWS = 6;
 const int BOARD_COLS = 7;
@@ -20,27 +19,49 @@ const char EMPTY_SPACE = '.';
 
 std::mutex games_mutex;
 
-struct Game {
+struct Game
+{
     char board[BOARD_ROWS][BOARD_COLS];
     int current_player;
+    int starter;
     bool game_over;
 
-    Game() : current_player(0), game_over(false) {
-        for (int i = 0; i < BOARD_ROWS; ++i) {
-            for (int j = 0; j < BOARD_COLS; ++j) {
+    Game() : current_player(0), game_over(false)
+    {
+        for (int i = 0; i < BOARD_ROWS; ++i)
+        {
+            for (int j = 0; j < BOARD_COLS; ++j)
+            {
                 board[i][j] = EMPTY_SPACE;
             }
+        }
+
+        // Decidir al azar quién comienza primero
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dist(0, 1);
+        current_player = dist(gen); // 0 para el jugador, 1 para la computadora
+        starter = current_player;
+
+        // Si la computadora comienza primero, hacemos su movimiento
+        if (current_player == 1)
+        {
+            computerMove();
         }
     }
 
     // Función para realizar un movimiento
-    bool makeMove(int column) {
-        if (column < 0 || column >= BOARD_COLS) {
+    bool makeMove(int column)
+    {
+        if (column < 0 || column >= BOARD_COLS)
+        {
             return false; // Columna inválida
         }
         // Encuentra la fila más baja disponible en esa columna
-        for (int i = BOARD_ROWS - 1; i >= 0; --i) {
-            if (board[i][column] == EMPTY_SPACE) {
+        for (int i = BOARD_ROWS - 1; i >= 0; --i)
+        {
+            if (board[i][column] == EMPTY_SPACE)
+            {
                 board[i][column] = current_player == 0 ? PLAYER_ONE : PLAYER_TWO;
                 checkWin(i, column);
                 current_player = 1 - current_player; // Cambiar de jugador
@@ -50,39 +71,82 @@ struct Game {
         return false; // Columna llena
     }
 
-    bool checkLine(const char token, const int start_row, const int start_col, const int delta_row, const int delta_col) {
-    int count = 0;
-    // Verificar en una dirección
-    for (int i = 0; i < 4; ++i) {
-        int r = start_row + i * delta_row;
-        int c = start_col + i * delta_col;
-        if (r < 0 || r >= BOARD_ROWS || c < 0 || c >= BOARD_COLS || board[r][c] != token) {
-            return false;
+    bool checkLine(const char token, const int start_row, const int start_col, const int delta_row, const int delta_col)
+    {
+        int count = 0;
+        // Verificar en una dirección
+        for (int i = 0; i < 4; ++i)
+        {
+            int r = start_row + i * delta_row;
+            int c = start_col + i * delta_col;
+            if (r < 0 || r >= BOARD_ROWS || c < 0 || c >= BOARD_COLS || board[r][c] != token)
+            {
+                return false;
+            }
+            count++;
         }
-        count++;
+        return count == 4;
     }
-    return count == 4;
-}
 
-void checkWin(const int last_row, const int last_col) {
-    const char player_token = board[last_row][last_col];
-    // Verificar todas las direcciones desde la posición actual
-    const int directions[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}}; // horizontal, vertical, diagonal1, diagonal2
+    void checkWin(const int last_row, const int last_col)
+    {
+        const char player_token = board[last_row][last_col];
+        // Verificar todas las direcciones desde la posición actual
+        const int directions[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}}; // horizontal, vertical, diagonal1, diagonal2
 
-    for (auto& dir : directions) {
-        if ((checkLine(player_token, last_row, last_col, dir[0], dir[1])) ||
-            (checkLine(player_token, last_row, last_col, -dir[0], -dir[1]))) {
-            game_over = true;
-            return;
+        for (auto &dir : directions)
+        {
+            if ((checkLine(player_token, last_row, last_col, dir[0], dir[1])) ||
+                (checkLine(player_token, last_row, last_col, -dir[0], -dir[1])))
+            {
+                game_over = true;
+                return;
+            }
         }
     }
-}
 
+    void computerMove()
+    {
+        std::vector<int> availableColumns;
+        // Primero, asegurémonos de que solo seleccionemos columnas que tengan espacio disponible.
+        for (int col = 0; col < BOARD_COLS; ++col)
+        {
+            for (int row = BOARD_ROWS - 1; row >= 0; --row)
+            {
+                if (board[row][col] == EMPTY_SPACE)
+                {
+                    availableColumns.push_back(col);
+                    break; // Solo necesitamos saber que al menos una fila en esta columna está libre.
+                }
+            }
+        }
+
+        if (!availableColumns.empty())
+        {
+            std::random_device rd;  // Obtener un número aleatorio del dispositivo de hardware
+            std::mt19937 gen(rd()); // Motor de generación de números aleatorios
+            std::uniform_int_distribution<> distrib(0, availableColumns.size() - 1);
+
+            int column = availableColumns[distrib(gen)]; // Elije una columna al azar
+            // Realiza el movimiento en la primera fila disponible desde abajo hacia arriba en la columna elegida.
+            makeMove(column); // Realiza el movimiento
+            std::cout << "Computadora juega en columna " << column << std::endl;
+
+            // No cambiamos el jugador aquí, lo manejamos en el ciclo principal
+            if (game_over)
+            {
+                std::cout << "¡La computadora gana!\n";
+            }
+        }
+    }
 
     // Función para reiniciar el juego
-    void resetGame() {
-        for (int i = 0; i < BOARD_ROWS; ++i) {
-            for (int j = 0; j < BOARD_COLS; ++j) {
+    void resetGame()
+    {
+        for (int i = 0; i < BOARD_ROWS; ++i)
+        {
+            for (int j = 0; j < BOARD_COLS; ++j)
+            {
                 board[i][j] = EMPTY_SPACE;
             }
         }
@@ -91,54 +155,44 @@ void checkWin(const int last_row, const int last_col) {
     }
 };
 
-std::string serializeBoard(const Game& game) {
+std::string serializeBoard(const Game &game)
+{
     std::string boardStr;
-    for (int i = 0; i < BOARD_ROWS; ++i) {
-        for (int j = 0; j < BOARD_COLS; ++j) {
+    // Agregar todas las filas del tablero
+    for (int i = 0; i < BOARD_ROWS; ++i)
+    {
+        for (int j = 0; j < BOARD_COLS; ++j)
+        {
             boardStr += game.board[i][j];
-            boardStr += " ";  // Espacio para separar columnas
+            boardStr += " "; // Espacio para separar columnas
         }
         boardStr += "\n"; // Nueva línea al final de cada fila
     }
+    boardStr += "\n";
+    // Agregar índices de columnas al final
+    for (int j = 0; j < BOARD_COLS; ++j)
+    {
+        boardStr += std::to_string(j) + " "; // Convertir el índice de la columna a string y agregarlo
+    }
+    boardStr += "\n"; // Nueva línea al final de los índices de las columnas
     return boardStr;
 }
 
 std::vector<Game> games;
 
-struct ClientData {
+struct ClientData
+{
     int sock;
     struct sockaddr_in address;
-    Game* game;
+    Game *game;
 };
 
-
-void computerMove(Game& game) {
-    std::vector<int> availableColumns;
-    for (int col = 0; col < BOARD_COLS; ++col) {
-        if (game.board[BOARD_ROWS - 1][col] == EMPTY_SPACE) {  // Comprueba si la fila superior está libre
-            availableColumns.push_back(col);
-        }
-    }
-
-    if (!availableColumns.empty()) {
-        std::random_device rd;  // Obtener un número aleatorio del dispositivo de hardware
-        std::mt19937 gen(rd()); // Motor de generación de números aleatorios
-        std::uniform_int_distribution<> distrib(0, availableColumns.size() - 1);
-
-        int column = availableColumns[distrib(gen)]; // Elije una columna al azar
-        game.makeMove(column);
-        std::cout << "Computer placed on column " << column << std::endl;
-        if (game.game_over) {
-            std::cout << "Computer wins!\n";
-        }
-    }
-}
-
-void* handle_client(void* arg) {
-    ClientData* data = static_cast<ClientData*>(arg);
+void *handle_client(void *arg)
+{
+    ClientData *data = static_cast<ClientData *>(arg);
     int sock = data->sock;
     struct sockaddr_in clientAddr = data->address;
-    Game* game = data->game;
+    Game *game = data->game;
 
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, INET_ADDRSTRLEN);
@@ -148,17 +202,21 @@ void* handle_client(void* arg) {
 
     char buffer[1024];
 
+    std::string startMessage = (game->starter== 0) ? "El jugador comienza el juego.\n" : "El computador comienza el juego.\n";
+    send(sock, startMessage.c_str(), startMessage.length(), 0);
+
     // Envía el tablero inicial al conectar
     std::string boardState = serializeBoard(*game);
     std::string response = "Ingrese columna (0-6) o 'exit' para salir: \n";
     send(sock, response.c_str(), response.length(), 0);
     send(sock, boardState.c_str(), boardState.length(), 0);
 
-
-    while (true) {
+    while (true)
+    {
         memset(buffer, 0, sizeof(buffer));
         int n_bytes = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (n_bytes <= 0) {
+        if (n_bytes <= 0)
+        {
             std::cout << "[" << client_ip << ":" << client_port << "] El jugador se ha desconectado." << std::endl;
             break; // Salir si el cliente se desconecta
         }
@@ -170,7 +228,8 @@ void* handle_client(void* arg) {
         buffer[strcspn(buffer, "\n")] = 0;
         buffer[strcspn(buffer, "\r")] = 0;
 
-        if (std::string(buffer) == "exit") {
+        if (std::string(buffer) == "exit")
+        {
             std::cout << "[" << client_ip << ":" << client_port << "] El jugador abandona el juego." << std::endl;
             break;
         }
@@ -180,37 +239,48 @@ void* handle_client(void* arg) {
         int column;
         char extraChar;
 
-        if (!(iss >> column) || iss >> extraChar) {
+        if (!(iss >> column) || iss >> extraChar)
+        {
             // Si no se pudo leer un entero o si hay caracteres extras después del número
             std::string response = "Movimiento inválido\n" + serializeBoard(*game);
             send(sock, response.c_str(), response.length(), 0);
-        } else if (game->makeMove(column)) {
-            if (game->game_over) {
+        }
+        else if (game->makeMove(column))
+        {
+            if (game->game_over)
+            {
                 std::string response = "¡Ganaste!\n" + serializeBoard(*game);
                 send(sock, response.c_str(), response.length(), 0);
-                game->resetGame();  // Reinicia el juego automáticamente
-            } else {
-                computerMove(*game);  // Llama a la función de movimiento del computador
+                game->resetGame(); // Reinicia el juego automáticamente
+            }
+            else
+            {
+                game->computerMove(); // Llama a la función de movimiento del computador
                 std::string response = "Movimiento aceptado\n" + serializeBoard(*game);
                 send(sock, response.c_str(), response.length(), 0);
-                if (game->game_over) {
+                if (game->game_over)
+                {
                     response = "El computador gana!\n" + serializeBoard(*game);
                     send(sock, response.c_str(), response.length(), 0);
                     game->resetGame();
                 }
             }
-        } else {
+        }
+        else
+        {
             std::string response = "Movimiento inválido\n" + serializeBoard(*game);
             send(sock, response.c_str(), response.length(), 0);
-        }   
-    }   
-        close(sock);
-        delete data;
-        pthread_exit(NULL);
+        }
+    }
+    close(sock);
+    delete data;
+    pthread_exit(NULL);
 }
 
-int main(int argc, char **argv) {
-    if (argc != 2) {
+int main(int argc, char **argv)
+{
+    if (argc != 2)
+    {
         std::cout << "Uso: " << argv[0] << " <port>" << std::endl;
         return 1;
     }
@@ -221,7 +291,8 @@ int main(int argc, char **argv) {
     socklen_t addr_size = sizeof(struct sockaddr_in);
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
+    if (server_fd < 0)
+    {
         perror("No se pudo crear el socket");
         exit(EXIT_FAILURE);
     }
@@ -231,30 +302,35 @@ int main(int argc, char **argv) {
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(port);
 
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
         perror("Error de enlace");
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_fd, MAX_CLIENTS) < 0) {
+    if (listen(server_fd, MAX_CLIENTS) < 0)
+    {
         perror("Escucha fallida");
         exit(EXIT_FAILURE);
     }
 
     std::cout << "El servidor está escuchando en el puerto " << port << std::endl;
 
-    while (true) {
+    while (true)
+    {
         int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
-        if (client_sock < 0) {
+        if (client_sock < 0)
+        {
             perror("Aceptar fallo");
             continue;
         }
 
-        Game* newGame = new Game();
-        ClientData* clientData = new ClientData{client_sock, client_addr, newGame};
+        Game *newGame = new Game();
+        ClientData *clientData = new ClientData{client_sock, client_addr, newGame};
 
         pthread_t thread;
-        if (pthread_create(&thread, NULL, handle_client, (void*)clientData) != 0) {
+        if (pthread_create(&thread, NULL, handle_client, (void *)clientData) != 0)
+        {
             std::cerr << "Error al crear hilo" << std::endl;
             delete newGame;
             delete clientData;

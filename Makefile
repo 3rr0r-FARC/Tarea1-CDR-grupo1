@@ -1,0 +1,17 @@
+CC = g++
+CFLAGS = -pthread -std=c++11
+SERVER_SRC = server.cpp
+CLIENT_SRC = cliente.cpp
+SERVER_TARGET = server
+CLIENT_TARGET = cliente
+
+all: $(SERVER_TARGET) $(CLIENT_TARGET)
+
+$(SERVER_TARGET): $(SERVER_SRC)
+	$(CC) $(CFLAGS) -o $(SERVER_TARGET) $(SERVER_SRC)
+
+$(CLIENT_TARGET): $(CLIENT_SRC)
+	$(CC) $(CFLAGS) -o $(CLIENT_TARGET) $(CLIENT_SRC)
+
+clean:
+	rm -f $(SERVER_TARGET) $(CLIENT_TARGET)

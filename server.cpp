@@ -13,44 +13,33 @@
 const int MAX_CLIENTS = 10;
 const int BOARD_ROWS = 6;
 const int BOARD_COLS = 7;
-const char PLAYER_ONE = 'X';
-const char PLAYER_TWO = 'O';
+const char PLAYER_ONE = 'C';
+const char PLAYER_TWO = 'S';
 const char EMPTY_SPACE = '.';
 
 std::mutex games_mutex;
 
-struct Game
+class Game
 {
+private:
     char board[BOARD_ROWS][BOARD_COLS];
     int current_player;
     int starter;
     bool game_over;
 
-    Game() : current_player(0), game_over(false)
+public:
+    Game()
+        : current_player(0), game_over(false)
     {
-        for (int i = 0; i < BOARD_ROWS; ++i)
-        {
-            for (int j = 0; j < BOARD_COLS; ++j)
-            {
-                board[i][j] = EMPTY_SPACE;
-            }
-        }
-
+        resetGame();
         // Decidir al azar quién comienza primero
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<> dist(0, 1);
         current_player = dist(gen); // 0 para el jugador, 1 para la computadora
         starter = current_player;
-
-        // Si la computadora comienza primero, hacemos su movimiento
-        if (current_player == 1)
-        {
-            computerMove();
-        }
     }
 
-    // Función para realizar un movimiento
     bool makeMove(int column)
     {
         if (column < 0 || column >= BOARD_COLS)
@@ -71,6 +60,92 @@ struct Game
         return false; // Columna llena
     }
 
+    std::string serializeBoard() const
+    {
+        std::string boardStr;
+        // Agregar todas las filas del tablero
+        for (int i = 0; i < BOARD_ROWS; ++i)
+        {
+            for (int j = 0; j < BOARD_COLS; ++j)
+            {
+                boardStr += board[i][j];
+                boardStr += " "; // Espacio para separar columnas
+            }
+            boardStr += "\n"; // Nueva línea al final de cada fila
+        }
+        boardStr += "\n";
+        // Agregar índices de columnas al final
+        for (int j = 0; j < BOARD_COLS; ++j)
+        {
+            boardStr += std::to_string(j) + " "; // Convertir el índice de la columna a string y agregarlo
+        }
+        boardStr += "\n"; // Nueva línea al final de los índices de las columnas
+        return boardStr;
+    }
+
+    bool isGameOver() const
+    {
+        return game_over;
+    }
+
+    int getCurrentPlayer() const
+    {
+        return current_player;
+    }
+
+    int getStarter() const
+    {
+        return starter;
+    }
+
+    void computerMove(std::string client_ip, int client_port)
+    {
+        std::vector<int> availableColumns;
+        // Primero, asegurémonos de que solo seleccionemos columnas que tengan espacio disponible.
+        for (int col = 0; col < BOARD_COLS; ++col)
+        {
+            for (int row = BOARD_ROWS - 1; row >= 0; --row)
+            {
+                if (board[row][col] == EMPTY_SPACE)
+                {
+                    availableColumns.push_back(col);
+                    break; // Solo necesitamos saber que al menos una fila en esta columna está libre.
+                }
+            }
+        }
+
+        if (!availableColumns.empty())
+        {
+            std::random_device rd;  // Obtener un número aleatorio del dispositivo de hardware
+            std::mt19937 gen(rd()); // Motor de generación de números aleatorios
+            std::uniform_int_distribution<> distrib(0, availableColumns.size() - 1);
+
+            int column = availableColumns[distrib(gen)]; // Elije una columna al azar
+            // Realiza el movimiento en la primera fila disponible desde abajo hacia arriba en la columna elegida.
+            makeMove(column); // Realiza el movimiento
+            std::cout << "Juego [" << client_ip << ":" << client_port << "]: servidor juega columna " << column << "." << std::endl;
+
+            if (game_over)
+            {
+                std::cout << "¡El servidor gana!\n";
+            }
+        }
+    }
+
+    void resetGame()
+    {
+        for (int i = 0; i < BOARD_ROWS; ++i)
+        {
+            for (int j = 0; j < BOARD_COLS; ++j)
+            {
+                board[i][j] = EMPTY_SPACE;
+            }
+        }
+        current_player = 0;
+        game_over = false;
+    }
+
+private:
     bool checkLine(const char token, const int start_row, const int start_col, const int delta_row, const int delta_col)
     {
         int count = 0;
@@ -104,178 +179,170 @@ struct Game
             }
         }
     }
+};
 
-    void computerMove()
+class Server
+{
+private:
+    int server_fd;
+    struct sockaddr_in server_addr;
+    std::vector<std::thread> threads;
+    std::vector<Game> games;
+
+public:
+    Server(int port)
     {
-        std::vector<int> availableColumns;
-        // Primero, asegurémonos de que solo seleccionemos columnas que tengan espacio disponible.
-        for (int col = 0; col < BOARD_COLS; ++col)
+        server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd < 0)
         {
-            for (int row = BOARD_ROWS - 1; row >= 0; --row)
+            perror("No se pudo crear el socket");
+            exit(EXIT_FAILURE);
+        }
+
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        server_addr.sin_port = htons(port);
+
+        if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+        {
+            perror("Error de enlace");
+            exit(EXIT_FAILURE);
+        }
+
+        if (listen(server_fd, MAX_CLIENTS) < 0)
+        {
+            perror("Escucha fallida");
+            exit(EXIT_FAILURE);
+        }
+
+        std::cout << "Esperando conexiones ..." << std::endl;
+    }
+
+    ~Server()
+    {
+        close(server_fd);
+        for (auto &t : threads)
+        {
+            if (t.joinable())
             {
-                if (board[row][col] == EMPTY_SPACE)
+                t.join();
+            }
+        }
+    }
+
+    void run()
+    {
+        while (true)
+        {
+            struct sockaddr_in client_addr;
+            socklen_t addr_size = sizeof(client_addr);
+            int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
+            if (client_sock < 0)
+            {
+                perror("Aceptar fallo");
+                continue;
+            }
+
+            char client_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+            int client_port = ntohs(client_addr.sin_port);
+            std::cout << "Juego nuevo [" << client_ip << ":" << client_port << "]" << std::endl;
+
+            std::unique_lock<std::mutex> lock(games_mutex);
+            games.emplace_back();
+            Game &newGame = games.back();
+            lock.unlock();
+
+            threads.emplace_back(&Server::handleClient, this, client_sock, client_addr, &newGame, std::string(client_ip), client_port);
+        }
+    }
+
+private:
+    void handleClient(int client_sock, struct sockaddr_in client_addr, Game *game, std::string client_ip, int client_port)
+    {
+        char buffer[1024];
+
+        std::string startMessage = (game->getStarter() == 0) ? "El jugador comienza el juego.\n" : "El servidor comienza el juego.\n";
+        std::cout << "Juego [" << client_ip << ":" << client_port << "]: " << startMessage;
+        send(client_sock, startMessage.c_str(), startMessage.length(), 0);
+
+        if (game->getStarter() == 1)
+        {
+            game->computerMove(client_ip, client_port);
+        }
+
+        // Envía el tablero inicial al conectar
+        std::string boardState = game->serializeBoard();
+        std::string response = "Ingrese columna (0-6) o 'exit' para salir: \n";
+        send(client_sock, response.c_str(), response.length(), 0);
+        send(client_sock, boardState.c_str(), boardState.length(), 0);
+
+        while (true)
+        {
+            memset(buffer, 0, sizeof(buffer));
+            int n_bytes = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
+            if (n_bytes <= 0)
+            {
+                std::cout << "[" << client_ip << ":" << client_port << "] El jugador se ha desconectado." << std::endl;
+                break; // Salir si el cliente se desconecta
+            }
+
+            buffer[n_bytes] = '\0'; // Asegurar que el buffer es una cadena válida
+
+            std::cout << "Juego [" << client_ip << ":" << client_port << "]: Recibido: " << buffer << std::endl;
+
+            buffer[strcspn(buffer, "\n")] = 0;
+            buffer[strcspn(buffer, "\r")] = 0;
+
+            if (std::string(buffer) == "exit")
+            {
+                std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador abandona el juego." << std::endl;
+                break;
+            }
+
+            std::string input(buffer);
+            std::istringstream iss(input);
+            int column;
+            char extraChar;
+
+            if (!(iss >> column) || iss >> extraChar)
+            {
+                // Si no se pudo leer un entero o si hay caracteres extras después del número
+                std::string response = "Movimiento inválido\n" + game->serializeBoard();
+                send(client_sock, response.c_str(), response.length(), 0);
+            }
+            else if (game->makeMove(column))
+            {
+                std::cout << "Juego [" << client_ip << ":" << client_port << "]: cliente juega columna " << column << "." << std::endl;
+                if (game->isGameOver())
                 {
-                    availableColumns.push_back(col);
-                    break; // Solo necesitamos saber que al menos una fila en esta columna está libre.
+                    std::string response = "¡Ganaste!\n" + game->serializeBoard();
+                    send(client_sock, response.c_str(), response.length(), 0);
+                    game->resetGame(); // Reinicia el juego automáticamente
                 }
-            }
-        }
-
-        if (!availableColumns.empty())
-        {
-            std::random_device rd;  // Obtener un número aleatorio del dispositivo de hardware
-            std::mt19937 gen(rd()); // Motor de generación de números aleatorios
-            std::uniform_int_distribution<> distrib(0, availableColumns.size() - 1);
-
-            int column = availableColumns[distrib(gen)]; // Elije una columna al azar
-            // Realiza el movimiento en la primera fila disponible desde abajo hacia arriba en la columna elegida.
-            makeMove(column); // Realiza el movimiento
-            std::cout << "Computadora juega en columna " << column << std::endl;
-
-            // No cambiamos el jugador aquí, lo manejamos en el ciclo principal
-            if (game_over)
-            {
-                std::cout << "¡La computadora gana!\n";
-            }
-        }
-    }
-
-    // Función para reiniciar el juego
-    void resetGame()
-    {
-        for (int i = 0; i < BOARD_ROWS; ++i)
-        {
-            for (int j = 0; j < BOARD_COLS; ++j)
-            {
-                board[i][j] = EMPTY_SPACE;
-            }
-        }
-        current_player = 0;
-        game_over = false;
-    }
-};
-
-std::string serializeBoard(const Game &game)
-{
-    std::string boardStr;
-    // Agregar todas las filas del tablero
-    for (int i = 0; i < BOARD_ROWS; ++i)
-    {
-        for (int j = 0; j < BOARD_COLS; ++j)
-        {
-            boardStr += game.board[i][j];
-            boardStr += " "; // Espacio para separar columnas
-        }
-        boardStr += "\n"; // Nueva línea al final de cada fila
-    }
-    boardStr += "\n";
-    // Agregar índices de columnas al final
-    for (int j = 0; j < BOARD_COLS; ++j)
-    {
-        boardStr += std::to_string(j) + " "; // Convertir el índice de la columna a string y agregarlo
-    }
-    boardStr += "\n"; // Nueva línea al final de los índices de las columnas
-    return boardStr;
-}
-
-std::vector<Game> games;
-
-struct ClientData
-{
-    int sock;
-    struct sockaddr_in address;
-    Game *game;
-};
-
-void *handle_client(void *arg)
-{
-    ClientData *data = static_cast<ClientData *>(arg);
-    int sock = data->sock;
-    struct sockaddr_in clientAddr = data->address;
-    Game *game = data->game;
-
-    char client_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, INET_ADDRSTRLEN);
-    int client_port = ntohs(clientAddr.sin_port);
-
-    std::cout << "Nuevo jugador conectado desde [" << client_ip << ":" << client_port << "]." << std::endl;
-
-    char buffer[1024];
-
-    std::string startMessage = (game->starter== 0) ? "El jugador comienza el juego.\n" : "El computador comienza el juego.\n";
-    send(sock, startMessage.c_str(), startMessage.length(), 0);
-
-    // Envía el tablero inicial al conectar
-    std::string boardState = serializeBoard(*game);
-    std::string response = "Ingrese columna (0-6) o 'exit' para salir: \n";
-    send(sock, response.c_str(), response.length(), 0);
-    send(sock, boardState.c_str(), boardState.length(), 0);
-
-    while (true)
-    {
-        memset(buffer, 0, sizeof(buffer));
-        int n_bytes = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (n_bytes <= 0)
-        {
-            std::cout << "[" << client_ip << ":" << client_port << "] El jugador se ha desconectado." << std::endl;
-            break; // Salir si el cliente se desconecta
-        }
-
-        buffer[n_bytes] = '\0'; // Asegurar que el buffer es una cadena válida
-
-        std::cout << "[" << client_ip << ":" << client_port << "] Recibido: " << buffer << std::endl;
-
-        buffer[strcspn(buffer, "\n")] = 0;
-        buffer[strcspn(buffer, "\r")] = 0;
-
-        if (std::string(buffer) == "exit")
-        {
-            std::cout << "[" << client_ip << ":" << client_port << "] El jugador abandona el juego." << std::endl;
-            break;
-        }
-
-        std::string input(buffer);
-        std::istringstream iss(input);
-        int column;
-        char extraChar;
-
-        if (!(iss >> column) || iss >> extraChar)
-        {
-            // Si no se pudo leer un entero o si hay caracteres extras después del número
-            std::string response = "Movimiento inválido\n" + serializeBoard(*game);
-            send(sock, response.c_str(), response.length(), 0);
-        }
-        else if (game->makeMove(column))
-        {
-            if (game->game_over)
-            {
-                std::string response = "¡Ganaste!\n" + serializeBoard(*game);
-                send(sock, response.c_str(), response.length(), 0);
-                game->resetGame(); // Reinicia el juego automáticamente
+                else
+                {
+                    game->computerMove(client_ip, client_port); // Llama a la función de movimiento del servidor
+                    std::string response = "Movimiento aceptado\n" + game->serializeBoard();
+                    send(client_sock, response.c_str(), response.length(), 0);
+                    if (game->isGameOver())
+                    {
+                        response = "El servidor gana!\n" + game->serializeBoard();
+                        send(client_sock, response.c_str(), response.length(), 0);
+                        game->resetGame();
+                    }
+                }
             }
             else
             {
-                game->computerMove(); // Llama a la función de movimiento del computador
-                std::string response = "Movimiento aceptado\n" + serializeBoard(*game);
-                send(sock, response.c_str(), response.length(), 0);
-                if (game->game_over)
-                {
-                    response = "El computador gana!\n" + serializeBoard(*game);
-                    send(sock, response.c_str(), response.length(), 0);
-                    game->resetGame();
-                }
+                std::string response = "Movimiento inválido\n" + game->serializeBoard();
+                send(client_sock, response.c_str(), response.length(), 0);
             }
         }
-        else
-        {
-            std::string response = "Movimiento inválido\n" + serializeBoard(*game);
-            send(sock, response.c_str(), response.length(), 0);
-        }
+        close(client_sock);
     }
-    close(sock);
-    delete data;
-    pthread_exit(NULL);
-}
+};
 
 int main(int argc, char **argv)
 {
@@ -285,59 +352,10 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int port = atoi(argv[1]);
-    int server_fd;
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t addr_size = sizeof(struct sockaddr_in);
+    int port = std::stoi(argv[1]);
 
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0)
-    {
-        perror("No se pudo crear el socket");
-        exit(EXIT_FAILURE);
-    }
-
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_addr.sin_port = htons(port);
-
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-    {
-        perror("Error de enlace");
-        exit(EXIT_FAILURE);
-    }
-
-    if (listen(server_fd, MAX_CLIENTS) < 0)
-    {
-        perror("Escucha fallida");
-        exit(EXIT_FAILURE);
-    }
-
-    std::cout << "El servidor está escuchando en el puerto " << port << std::endl;
-
-    while (true)
-    {
-        int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
-        if (client_sock < 0)
-        {
-            perror("Aceptar fallo");
-            continue;
-        }
-
-        Game *newGame = new Game();
-        ClientData *clientData = new ClientData{client_sock, client_addr, newGame};
-
-        pthread_t thread;
-        if (pthread_create(&thread, NULL, handle_client, (void *)clientData) != 0)
-        {
-            std::cerr << "Error al crear hilo" << std::endl;
-            delete newGame;
-            delete clientData;
-            close(client_sock);
-        }
-        pthread_detach(thread);
-    }
+    Server server(port);
+    server.run();
 
     return 0;
 }

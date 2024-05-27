@@ -32,12 +32,6 @@ public:
         : current_player(0), game_over(false)
     {
         resetGame();
-        // Decidir al azar quién comienza primero
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dist(0, 1);
-        current_player = dist(gen); // 0 para el jugador, 1 para la computadora
-        starter = current_player;
     }
 
     bool makeMove(int column)
@@ -141,7 +135,11 @@ public:
                 board[i][j] = EMPTY_SPACE;
             }
         }
-        current_player = 0;
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dist(0, 1);
+        starter = dist(gen); // 0 para el jugador, 1 para la computadora
+        current_player = starter;
         game_over = false;
     }
 
@@ -263,84 +261,96 @@ private:
     {
         char buffer[1024];
 
-        std::string startMessage = (game->getStarter() == 0) ? "El jugador comienza el juego.\n" : "El servidor comienza el juego.\n";
-        std::cout << "Juego [" << client_ip << ":" << client_port << "]: " << startMessage;
-        send(client_sock, startMessage.c_str(), startMessage.length(), 0);
-
-        if (game->getStarter() == 1)
-        {
-            game->computerMove(client_ip, client_port);
-        }
-
-        // Envía el tablero inicial al conectar
-        std::string boardState = game->serializeBoard();
-        std::string response = "Ingrese columna (0-6) o 'exit' para salir: \n";
-        send(client_sock, response.c_str(), response.length(), 0);
-        send(client_sock, boardState.c_str(), boardState.length(), 0);
-
         while (true)
         {
-            memset(buffer, 0, sizeof(buffer));
-            int n_bytes = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
-            if (n_bytes <= 0)
+            std::string startMessage = (game->getStarter() == 0) ? "El jugador comienza el juego.\n" : "El servidor comienza el juego.\n";
+            std::cout << "Juego [" << client_ip << ":" << client_port << "]: " << startMessage;
+            send(client_sock, startMessage.c_str(), startMessage.length(), 0);
+
+            if (game->getStarter() == 1)
             {
-                std::cout << "[" << client_ip << ":" << client_port << "] El jugador se ha desconectado." << std::endl;
-                break; // Salir si el cliente se desconecta
+                game->computerMove(client_ip, client_port);
             }
 
-            buffer[n_bytes] = '\0'; // Asegurar que el buffer es una cadena válida
+            // Envía el tablero inicial al conectar o después de reiniciar
+            std::string boardState = game->serializeBoard();
+            std::string response = "Ingrese columna (0-6), 'r' para reiniciar o 'exit' para salir: \n";
+            send(client_sock, response.c_str(), response.length(), 0);
+            send(client_sock, boardState.c_str(), boardState.length(), 0);
 
-            std::cout << "Juego [" << client_ip << ":" << client_port << "]: Recibido: " << buffer << std::endl;
-
-            buffer[strcspn(buffer, "\n")] = 0;
-            buffer[strcspn(buffer, "\r")] = 0;
-
-            if (std::string(buffer) == "exit")
+            while (true)
             {
-                std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador abandona el juego." << std::endl;
-                break;
-            }
-
-            std::string input(buffer);
-            std::istringstream iss(input);
-            int column;
-            char extraChar;
-
-            if (!(iss >> column) || iss >> extraChar)
-            {
-                // Si no se pudo leer un entero o si hay caracteres extras después del número
-                std::string response = "Movimiento inválido\n" + game->serializeBoard();
-                send(client_sock, response.c_str(), response.length(), 0);
-            }
-            else if (game->makeMove(column))
-            {
-                std::cout << "Juego [" << client_ip << ":" << client_port << "]: cliente juega columna " << column << "." << std::endl;
-                if (game->isGameOver())
+                memset(buffer, 0, sizeof(buffer));
+                int n_bytes = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
+                if (n_bytes <= 0)
                 {
-                    std::string response = "¡Ganaste!\n" + game->serializeBoard();
+                    std::cout << "[" << client_ip << ":" << client_port << "] El jugador se ha desconectado." << std::endl;
+                    close(client_sock);
+                    return; // Salir si el cliente se desconecta
+                }
+
+                buffer[n_bytes] = '\0'; // Asegurar que el buffer es una cadena válida
+
+                std::cout << "Juego [" << client_ip << ":" << client_port << "]: Recibido: " << buffer << std::endl;
+
+                buffer[strcspn(buffer, "\n")] = 0;
+                buffer[strcspn(buffer, "\r")] = 0;
+
+                if (std::string(buffer) == "exit")
+                {
+                    std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador abandona el juego." << std::endl;
+                    close(client_sock);
+                    return;
+                }
+
+                if (std::string(buffer) == "r")
+                {
+                    game->resetGame();
+                    if (game->getStarter() == 1)
+                    {
+                        game->computerMove(client_ip, client_port);
+                    }
+                    break; // Salir del bucle interno para reiniciar el juego
+                }
+
+                std::string input(buffer);
+                std::istringstream iss(input);
+                int column;
+                char extraChar;
+
+                if (!(iss >> column) || iss >> extraChar)
+                {
+                    // Si no se pudo leer un entero o si hay caracteres extras después del número
+                    std::string response = "Movimiento inválido\n" + game->serializeBoard();
                     send(client_sock, response.c_str(), response.length(), 0);
-                    game->resetGame(); // Reinicia el juego automáticamente
+                }
+                else if (game->makeMove(column))
+                {
+                    std::cout << "Juego [" << client_ip << ":" << client_port << "]: cliente juega columna " << column << "." << std::endl;
+                    if (game->isGameOver())
+                    {
+                        std::string response = "¡Ganaste!\n" + game->serializeBoard();
+                        send(client_sock, response.c_str(), response.length(), 0);
+                    }
+                    else
+                    {
+                        game->computerMove(client_ip, client_port); // Llama a la función de movimiento del servidor
+                        std::string response = "Movimiento aceptado\n" + game->serializeBoard();
+                        send(client_sock, response.c_str(), response.length(), 0);
+                        if (game->isGameOver())
+                        {
+                            response = "El servidor gana!\n" + game->serializeBoard();
+                            send(client_sock, response.c_str(), response.length(), 0);
+                        }
+                    }
                 }
                 else
                 {
-                    game->computerMove(client_ip, client_port); // Llama a la función de movimiento del servidor
-                    std::string response = "Movimiento aceptado\n" + game->serializeBoard();
+                    std::string response = "Movimiento inválido\n" + game->serializeBoard();
                     send(client_sock, response.c_str(), response.length(), 0);
-                    if (game->isGameOver())
-                    {
-                        response = "El servidor gana!\n" + game->serializeBoard();
-                        send(client_sock, response.c_str(), response.length(), 0);
-                        game->resetGame();
-                    }
                 }
             }
-            else
-            {
-                std::string response = "Movimiento inválido\n" + game->serializeBoard();
-                send(client_sock, response.c_str(), response.length(), 0);
-            }
         }
-        close(client_sock);
     }
 };
 

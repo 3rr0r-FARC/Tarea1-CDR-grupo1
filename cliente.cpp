@@ -23,7 +23,7 @@ void handleServerResponse(int sock)
 
         if (std::string(buffer).find("¡Ganaste!") != std::string::npos || std::string(buffer).find("El servidor gana!") != std::string::npos)
         {
-            break;
+            std::cout << "Ingrese 'r' para volver a jugar o 'exit' para salir.\n";
         }
     }
 }

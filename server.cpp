@@ -120,13 +120,13 @@ void* handle_client(void* arg) {
     inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, INET_ADDRSTRLEN);
     int client_port = ntohs(clientAddr.sin_port);
 
-    std::cout << "New player connected from [" << client_ip << ":" << client_port << "]." << std::endl;
+    std::cout << "Nuevo jugador conectado desde [" << client_ip << ":" << client_port << "]." << std::endl;
 
     char buffer[1024];
 
     // Envía el tablero inicial al conectar
     std::string boardState = serializeBoard(*game);
-    std::string response = "Enter column (0-6) or 'exit' to quit: \n";
+    std::string response = "Ingrese columna (0-6) o 'exit' para salir: \n";
     send(sock, response.c_str(), response.length(), 0);
     send(sock, boardState.c_str(), boardState.length(), 0);
 
@@ -135,19 +135,19 @@ void* handle_client(void* arg) {
         memset(buffer, 0, sizeof(buffer));
         int n_bytes = recv(sock, buffer, sizeof(buffer) - 1, 0);
         if (n_bytes <= 0) {
-            std::cout << "[" << client_ip << ":" << client_port << "] Player has disconnected." << std::endl;
+            std::cout << "[" << client_ip << ":" << client_port << "] El jugador se ha desconectado." << std::endl;
             break; // Salir si el cliente se desconecta
         }
 
         buffer[n_bytes] = '\0'; // Asegurar que el buffer es una cadena válida
 
-        std::cout << "[" << client_ip << ":" << client_port << "] Received: " << buffer << std::endl;
+        std::cout << "[" << client_ip << ":" << client_port << "] Recibido: " << buffer << std::endl;
 
         buffer[strcspn(buffer, "\n")] = 0;
         buffer[strcspn(buffer, "\r")] = 0;
 
         if (std::string(buffer) == "exit") {
-            std::cout << "[" << client_ip << ":" << client_port << "] Player quits the game." << std::endl;
+            std::cout << "[" << client_ip << ":" << client_port << "] El jugador abandona el juego." << std::endl;
             break;
         }
 
@@ -185,7 +185,7 @@ void* handle_client(void* arg) {
 
 int main(int argc, char **argv) {
     if (argc != 2) {
-        std::cout << "Usage: " << argv[0] << " <port>" << std::endl;
+        std::cout << "Uso: " << argv[0] << " <port>" << std::endl;
         return 1;
     }
 
@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
-        perror("Failed to create socket");
+        perror("No se pudo crear el socket");
         exit(EXIT_FAILURE);
     }
 
@@ -206,21 +206,21 @@ int main(int argc, char **argv) {
     server_addr.sin_port = htons(port);
 
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Bind failed");
+        perror("Error de enlace");
         exit(EXIT_FAILURE);
     }
 
     if (listen(server_fd, MAX_CLIENTS) < 0) {
-        perror("Listen failed");
+        perror("Escucha fallida");
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Server is listening on port " << port << std::endl;
+    std::cout << "El servidor está escuchando en el puerto " << port << std::endl;
 
     while (true) {
         int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
         if (client_sock < 0) {
-            perror("Accept failed");
+            perror("Aceptar fallo");
             continue;
         }
 
@@ -229,7 +229,7 @@ int main(int argc, char **argv) {
 
         pthread_t thread;
         if (pthread_create(&thread, NULL, handle_client, (void*)clientData) != 0) {
-            std::cerr << "Error creating thread" << std::endl;
+            std::cerr << "Error al crear hilo" << std::endl;
             delete newGame;
             delete clientData;
             close(client_sock);

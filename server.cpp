@@ -36,6 +36,7 @@ public:
 
     bool makeMove(int column)
     {
+        column -= 1; // Ajustar la columna para que sea de 1 a 7
         if (column < 0 || column >= BOARD_COLS)
         {
             return false; // Columna inválida
@@ -56,25 +57,25 @@ public:
 
     std::string serializeBoard() const
     {
-        std::string boardStr;
-        // Agregar todas las filas del tablero
+        std::ostringstream boardStr;
+        boardStr << "TABLERO\n";
         for (int i = 0; i < BOARD_ROWS; ++i)
         {
+            boardStr << (i + 1) << " ";
             for (int j = 0; j < BOARD_COLS; ++j)
             {
-                boardStr += board[i][j];
-                boardStr += " "; // Espacio para separar columnas
+                boardStr << board[i][j] << " ";
             }
-            boardStr += "\n"; // Nueva línea al final de cada fila
+            boardStr << "\n";
         }
-        boardStr += "\n";
-        // Agregar índices de columnas al final
+        boardStr << "-------------------------\n";
+        boardStr << "  ";
         for (int j = 0; j < BOARD_COLS; ++j)
         {
-            boardStr += std::to_string(j) + " "; // Convertir el índice de la columna a string y agregarlo
+            boardStr << (j + 1) << " ";
         }
-        boardStr += "\n"; // Nueva línea al final de los índices de las columnas
-        return boardStr;
+        boardStr << "\n";
+        return boardStr.str();
     }
 
     bool isGameOver() const
@@ -95,12 +96,11 @@ public:
     void computerMove(std::string client_ip, int client_port)
     {
         std::vector<int> availableColumns;
-        // Primero, asegurémonos de que solo seleccionemos columnas que tengan espacio disponible.
-        for (int col = 0; col < BOARD_COLS; ++col)
+        for (int col = 1; col <= BOARD_COLS; ++col) 
         {
             for (int row = BOARD_ROWS - 1; row >= 0; --row)
             {
-                if (board[row][col] == EMPTY_SPACE)
+                if (board[row][col - 1] == EMPTY_SPACE) // Ajustar el índice de la columna
                 {
                     availableColumns.push_back(col);
                     break; // Solo necesitamos saber que al menos una fila en esta columna está libre.
@@ -119,10 +119,6 @@ public:
             makeMove(column); // Realiza el movimiento
             std::cout << "Juego [" << client_ip << ":" << client_port << "]: servidor juega columna " << column << "." << std::endl;
 
-            if (game_over)
-            {
-                std::cout << "¡El servidor gana!\n";
-            }
         }
     }
 
@@ -274,8 +270,6 @@ private:
 
             // Envía el tablero inicial al conectar o después de reiniciar
             std::string boardState = game->serializeBoard();
-            std::string response = "Ingrese columna (0-6), 'r' para reiniciar o 'exit' para salir: \n";
-            send(client_sock, response.c_str(), response.length(), 0);
             send(client_sock, boardState.c_str(), boardState.length(), 0);
 
             while (true)
@@ -329,6 +323,7 @@ private:
                     std::cout << "Juego [" << client_ip << ":" << client_port << "]: cliente juega columna " << column << "." << std::endl;
                     if (game->isGameOver())
                     {
+                        std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador gana!\n" << std::endl;
                         std::string response = "¡Ganaste!\n" + game->serializeBoard();
                         send(client_sock, response.c_str(), response.length(), 0);
                     }
@@ -339,6 +334,7 @@ private:
                         send(client_sock, response.c_str(), response.length(), 0);
                         if (game->isGameOver())
                         {
+                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: El servidor gana!\n" << std::endl;
                             response = "El servidor gana!\n" + game->serializeBoard();
                             send(client_sock, response.c_str(), response.length(), 0);
                         }

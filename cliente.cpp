@@ -5,10 +5,15 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <thread>
+#include <mutex>
+
+std::mutex game_over_mutex;
+bool game_over = false;
 
 void handleServerResponse(int sock)
 {
     char buffer[1024];
+
     while (true)
     {
         memset(buffer, 0, sizeof(buffer));
@@ -23,6 +28,8 @@ void handleServerResponse(int sock)
 
         if (std::string(buffer).find("¡Ganaste!") != std::string::npos || std::string(buffer).find("El servidor gana!") != std::string::npos)
         {
+            std::lock_guard<std::mutex> lock(game_over_mutex);
+            game_over = true;
             std::cout << "Ingrese 'r' para volver a jugar o 'exit' para salir.\n";
         }
     }
@@ -72,8 +79,20 @@ int main(int argc, char **argv)
     while (true)
     {
         std::string input;
-        std::cout << "Ingrese columna (0-6) o 'exit' para salir: \n";
+        std::cout << "Ingrese columna (1-7) o 'exit' para salir: \n";
         std::getline(std::cin, input);
+
+        // Bloquear cualquier ingreso que no sea 'r' o 'exit' cuando el juego haya terminado
+        while (true)
+        {
+            std::lock_guard<std::mutex> lock(game_over_mutex);
+            if (!game_over || (input == "r" || input == "exit"))
+            {
+                break;
+            }
+            std::cout << "Entrada inválida. Ingrese 'r' para volver a jugar o 'exit' para salir: ";
+            std::getline(std::cin, input);
+        }
 
         if (send(sock, input.c_str(), input.length(), 0) < 0)
         {
@@ -84,6 +103,13 @@ int main(int argc, char **argv)
         if (input == "exit")
         {
             break;
+        }
+
+        // Resetear el estado de game_over si se reinicia el juego
+        if (input == "r")
+        {
+            std::lock_guard<std::mutex> lock(game_over_mutex);
+            game_over = false;
         }
     }
 

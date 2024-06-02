@@ -26,10 +26,11 @@ private:
     int current_player;
     int starter;
     bool game_over;
+    bool draw;
 
 public:
     Game()
-        : current_player(0), game_over(false)
+        : current_player(0), game_over(false), draw(false)
     {
         resetGame();
     }
@@ -48,6 +49,9 @@ public:
             {
                 board[i][column] = current_player == 0 ? PLAYER_ONE : PLAYER_TWO;
                 checkWin(i, column);
+                if (!game_over) {
+                    checkDraw();
+                }
                 current_player = 1 - current_player; // Cambiar de jugador
                 return true;
             }
@@ -83,6 +87,11 @@ public:
         return game_over;
     }
 
+    bool isDraw() const
+    {
+        return draw;
+    }
+
     int getCurrentPlayer() const
     {
         return current_player;
@@ -96,7 +105,7 @@ public:
     void computerMove(std::string client_ip, int client_port)
     {
         std::vector<int> availableColumns;
-        for (int col = 1; col <= BOARD_COLS; ++col) 
+        for (int col = 1; col <= BOARD_COLS; ++col)
         {
             for (int row = BOARD_ROWS - 1; row >= 0; --row)
             {
@@ -137,6 +146,7 @@ public:
         starter = dist(gen); // 0 para el jugador, 1 para la computadora
         current_player = starter;
         game_over = false;
+        draw = false;
     }
 
 private:
@@ -172,6 +182,22 @@ private:
                 return;
             }
         }
+    }
+
+    void checkDraw()
+    {
+        for (int i = 0; i < BOARD_ROWS; ++i)
+        {
+            for (int j = 0; j < BOARD_COLS; ++j)
+            {
+                if (board[i][j] == EMPTY_SPACE)
+                {
+                    return;
+                }
+            }
+        }
+        draw = true;
+        game_over = true;
     }
 };
 
@@ -323,9 +349,18 @@ private:
                     std::cout << "Juego [" << client_ip << ":" << client_port << "]: cliente juega columna " << column << "." << std::endl;
                     if (game->isGameOver())
                     {
-                        std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador gana!\n" << std::endl;
-                        std::string response = "¡Ganaste!\n" + game->serializeBoard();
-                        send(client_sock, response.c_str(), response.length(), 0);
+                        if (game->isDraw())
+                        {
+                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: ¡Empate!\n" << std::endl;
+                            std::string response = "¡Empate!\n" + game->serializeBoard();
+                            send(client_sock, response.c_str(), response.length(), 0);
+                        }
+                        else
+                        {
+                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador gana!\n" << std::endl;
+                            std::string response = "¡Ganaste!\n" + game->serializeBoard();
+                            send(client_sock, response.c_str(), response.length(), 0);
+                        }
                     }
                     else
                     {
@@ -334,9 +369,18 @@ private:
                         send(client_sock, response.c_str(), response.length(), 0);
                         if (game->isGameOver())
                         {
-                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: El servidor gana!\n" << std::endl;
-                            response = "El servidor gana!\n" + game->serializeBoard();
-                            send(client_sock, response.c_str(), response.length(), 0);
+                            if (game->isDraw())
+                            {
+                                std::cout << "Juego [" << client_ip << ":" << client_port << "]: ¡Empate!\n" << std::endl;
+                                response = "¡Empate!\n" + game->serializeBoard();
+                                send(client_sock, response.c_str(), response.length(), 0);
+                            }
+                            else
+                            {
+                                std::cout << "Juego [" << client_ip << ":" << client_port << "]: El servidor gana!\n" << std::endl;
+                                response = "El servidor gana!\n" + game->serializeBoard();
+                                send(client_sock, response.c_str(), response.length(), 0);
+                            }
                         }
                     }
                 }
@@ -365,3 +409,4 @@ int main(int argc, char **argv)
 
     return 0;
 }
+

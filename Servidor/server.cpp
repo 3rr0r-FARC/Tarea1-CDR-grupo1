@@ -49,7 +49,8 @@ public:
             {
                 board[i][column] = current_player == 0 ? PLAYER_ONE : PLAYER_TWO;
                 checkWin(i, column);
-                if (!game_over) {
+                if (!game_over)
+                {
                     checkDraw();
                 }
                 current_player = 1 - current_player; // Cambiar de jugador
@@ -127,7 +128,6 @@ public:
             // Realiza el movimiento en la primera fila disponible desde abajo hacia arriba en la columna elegida.
             makeMove(column); // Realiza el movimiento
             std::cout << "Juego [" << client_ip << ":" << client_port << "]: servidor juega columna " << column << "." << std::endl;
-
         }
     }
 
@@ -326,11 +326,17 @@ private:
                 if (std::string(buffer) == "r")
                 {
                     game->resetGame();
+                    startMessage = (game->getStarter() == 0) ? "El jugador comienza el juego.\n" : "El servidor comienza el juego.\n";
+                    std::cout << "Juego [" << client_ip << ":" << client_port << "]: " << startMessage;
+                    send(client_sock, startMessage.c_str(), startMessage.length(), 0);
+
                     if (game->getStarter() == 1)
                     {
                         game->computerMove(client_ip, client_port);
                     }
-                    break; // Salir del bucle interno para reiniciar el juego
+                    boardState = game->serializeBoard();
+                    send(client_sock, boardState.c_str(), boardState.length(), 0);
+                    continue; // Salir del bucle interno para reiniciar el juego
                 }
 
                 std::string input(buffer);
@@ -351,13 +357,15 @@ private:
                     {
                         if (game->isDraw())
                         {
-                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: ¡Empate!\n" << std::endl;
+                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: ¡Empate!\n"
+                                      << std::endl;
                             std::string response = "¡Empate!\n" + game->serializeBoard();
                             send(client_sock, response.c_str(), response.length(), 0);
                         }
                         else
                         {
-                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador gana!\n" << std::endl;
+                            std::cout << "Juego [" << client_ip << ":" << client_port << "]: El jugador gana!\n"
+                                      << std::endl;
                             std::string response = "¡Ganaste!\n" + game->serializeBoard();
                             send(client_sock, response.c_str(), response.length(), 0);
                         }
@@ -371,13 +379,15 @@ private:
                         {
                             if (game->isDraw())
                             {
-                                std::cout << "Juego [" << client_ip << ":" << client_port << "]: ¡Empate!\n" << std::endl;
+                                std::cout << "Juego [" << client_ip << ":" << client_port << "]: ¡Empate!\n"
+                                          << std::endl;
                                 response = "¡Empate!\n" + game->serializeBoard();
                                 send(client_sock, response.c_str(), response.length(), 0);
                             }
                             else
                             {
-                                std::cout << "Juego [" << client_ip << ":" << client_port << "]: El servidor gana!\n" << std::endl;
+                                std::cout << "Juego [" << client_ip << ":" << client_port << "]: El servidor gana!\n"
+                                          << std::endl;
                                 response = "El servidor gana!\n" + game->serializeBoard();
                                 send(client_sock, response.c_str(), response.length(), 0);
                             }
@@ -409,4 +419,3 @@ int main(int argc, char **argv)
 
     return 0;
 }
-
